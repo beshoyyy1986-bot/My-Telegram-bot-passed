@@ -753,54 +753,69 @@ CARD_FORMAT_HELP = (
 )
 
 # ═══════════════════════════════════════
-# بناء الكيبوردات
+# بناء الكيبوردات — ألوان حقيقية (Bot API 9.4)
 # ═══════════════════════════════════════
-# ملاحظة مهمة: Telegram Bot API لا يوفر خاصية لون للـ InlineKeyboardButton
-# (اللون يتبع ثيم المستخدم). لذلك نحاكى الألوان بمربعات ملونة + إيموجى.
-C_GREEN  = "🟢"
-C_BLUE   = "🔵"
-C_PURPLE = "🟣"
-C_ORANGE = "🟠"
-C_RED    = "🔴"
-C_YELLOW = "🟡"
-C_WHITE  = "⚪"
+# Telegram أضاف خاصية style للأزرار فى Bot API 9.4 (9 فبراير 2026).
+# الألوان المتاحة 3 فقط:  primary أزرق | success أخضر | danger أحمر
+# الدعم فى pyTelegramBotAPI بدأ من الإصدار 4.31.0
+STYLE_PRIMARY = "primary"   # 🔵 أزرق — الإجراءات الرئيسية
+STYLE_SUCCESS = "success"   # 🟢 أخضر — الإجراءات الإيجابية
+STYLE_DANGER  = "danger"    # 🔴 أحمر — الإجراءات الحساسة/الرجوع
+
+# تحقق أن المكتبة المثبتة تدعم style فعلياً.
+# ملاحظة: الإصدارات القديمة تبتلع style داخل **kwargs بدون خطأ،
+# لذلك نفحص المخرج المُسلسل (to_dict) وليس مجرد نجاح الاستدعاء.
+try:
+    _probe = types.InlineKeyboardButton("t", callback_data="t", style=STYLE_PRIMARY)
+    STYLE_SUPPORTED = _probe.to_dict().get('style') == STYLE_PRIMARY
+except Exception:
+    STYLE_SUPPORTED = False
+
+if not STYLE_SUPPORTED:
+    logger.warning(
+        "⚠️ إصدار pyTelegramBotAPI الحالى لا يدعم ألوان الأزرار (style). "
+        "حدّث المكتبة: pip install -U 'pyTelegramBotAPI>=4.31.0'"
+    )
+
+def btn(text, style=None, **kwargs):
+    """زر إنلاين مع لون — يتجاهل اللون تلقائياً لو المكتبة قديمة"""
+    if style and STYLE_SUPPORTED:
+        return types.InlineKeyboardButton(text, style=style, **kwargs)
+    return types.InlineKeyboardButton(text, **kwargs)
 
 def main_menu_kb():
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(
-        types.InlineKeyboardButton(f"{C_GREEN} 💳 فحص كارت",   callback_data="menu_single"),
-        types.InlineKeyboardButton(f"{C_BLUE} 📋 فحص مجموعة",  callback_data="menu_bulk"),
+        btn("💳 فحص كارت",   STYLE_SUCCESS, callback_data="menu_single"),
+        btn("📋 فحص مجموعة", STYLE_PRIMARY, callback_data="menu_bulk"),
     )
     kb.add(
-        types.InlineKeyboardButton(f"{C_PURPLE} 👤 حسابى",     callback_data="menu_account"),
-        types.InlineKeyboardButton(f"{C_YELLOW} 🎫 كود تفعيل", callback_data="menu_redeem"),
+        btn("👤 حسابى",      STYLE_PRIMARY, callback_data="menu_account"),
+        btn("🎫 كود تفعيل",  STYLE_SUCCESS, callback_data="menu_redeem"),
     )
     kb.add(
-        types.InlineKeyboardButton(f"{C_ORANGE} 🆘 الدعم", url="https://t.me/BaBa_MeDia_0"),
+        btn("🆘 الدعم", STYLE_PRIMARY, url="https://t.me/BaBa_MeDia_0"),
     )
     return kb
 
 def back_kb():
     kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton(f"{C_RED} 🏠 القائمة الرئيسية", callback_data="main_menu"))
+    kb.add(btn("🏠 القائمة الرئيسية", STYLE_DANGER, callback_data="main_menu"))
     return kb
 
 def gates_kb(mode):
     kb = types.InlineKeyboardMarkup(row_width=1)
-    colors = [C_GREEN, C_BLUE, C_PURPLE, C_YELLOW, C_ORANGE]
-    for i, (gid, info) in enumerate(GATES.items()):
-        dot = colors[i % len(colors)]
-        kb.add(types.InlineKeyboardButton(f"{dot} {info['name']}",
-                                          callback_data=f"gate_{gid}_{mode}"))
-    kb.add(types.InlineKeyboardButton(f"{C_RED} 🏠 القائمة الرئيسية", callback_data="main_menu"))
+    for gid, info in GATES.items():
+        kb.add(btn(info['name'], STYLE_PRIMARY, callback_data=f"gate_{gid}_{mode}"))
+    kb.add(btn("🏠 القائمة الرئيسية", STYLE_DANGER, callback_data="main_menu"))
     return kb
 
 def after_check_kb(mode):
     kb = types.InlineKeyboardMarkup(row_width=1)
     label = "🔄 فحص كارت آخر" if mode == 'single' else "🔄 فحص مجموعة أخرى"
     cb    = "menu_single"       if mode == 'single' else "menu_bulk"
-    kb.add(types.InlineKeyboardButton(f"{C_GREEN} {label}", callback_data=cb))
-    kb.add(types.InlineKeyboardButton(f"{C_RED} 🏠 القائمة الرئيسية", callback_data="main_menu"))
+    kb.add(btn(label, STYLE_SUCCESS, callback_data=cb))
+    kb.add(btn("🏠 القائمة الرئيسية", STYLE_DANGER, callback_data="main_menu"))
     return kb
 
 # ═══════════════════════════════════════
@@ -1491,19 +1506,19 @@ def check_bulk_ui(cards, chat_id, user_id, gate_id, msg_id):
 def show_admin_menu(user_id):
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(
-        types.InlineKeyboardButton(f"{C_GREEN} ➕ إنشاء كود",       callback_data="admin_create_code"),
-        types.InlineKeyboardButton(f"{C_BLUE} 📋 عرض الأكواد",      callback_data="admin_view_codes"),
+        btn("➕ إنشاء كود",       STYLE_SUCCESS, callback_data="admin_create_code"),
+        btn("📋 عرض الأكواد",     STYLE_PRIMARY, callback_data="admin_view_codes"),
     )
     kb.add(
-        types.InlineKeyboardButton(f"{C_PURPLE} 👥 عرض المستخدمين", callback_data="admin_view_users"),
-        types.InlineKeyboardButton(f"{C_ORANGE} 🗑️ إلغاء كود",      callback_data="admin_revoke_code"),
+        btn("👥 عرض المستخدمين",  STYLE_PRIMARY, callback_data="admin_view_users"),
+        btn("🗑️ إلغاء كود",       STYLE_DANGER,  callback_data="admin_revoke_code"),
     )
     kb.add(
-        types.InlineKeyboardButton(f"{C_YELLOW} 📡 جلب بروكسيات",   callback_data="admin_fetch_proxies"),
-        types.InlineKeyboardButton(f"{C_WHITE} 📊 حالة البروكسيات", callback_data="admin_proxy_stats"),
+        btn("📡 جلب بروكسيات",    STYLE_SUCCESS, callback_data="admin_fetch_proxies"),
+        btn("📊 حالة البروكسيات", STYLE_PRIMARY, callback_data="admin_proxy_stats"),
     )
     kb.add(
-        types.InlineKeyboardButton(f"{C_RED} ❌ خروج",              callback_data="admin_logout"),
+        btn("❌ خروج",            STYLE_DANGER,  callback_data="admin_logout"),
     )
     bot.send_message(
         user_id,
@@ -1608,6 +1623,15 @@ def _startup_report():
         print(f"👥 مستخدمين: {users} (اشتراك نشط: {active})")
         print(f"🎫 أكواد: {codes} (متاح: {free_codes})")
         print(f"📡 بروكسيات محفوظة: {prox}")
+        try:
+            import telebot.version as _tv
+            print(f"📚 pyTelegramBotAPI: {_tv.__version__}")
+        except Exception:
+            pass
+        if STYLE_SUPPORTED:
+            print("🎨 ألوان الأزرار: مفعّلة (primary/success/danger)")
+        else:
+            print("🎨 ألوان الأزرار: غير مدعومة — حدّث المكتبة لـ 4.31.0+")
         if DATA_DIR == os.path.dirname(os.path.abspath(__file__)):
             print("⚠️ تحذير: البيانات مخزنة بجوار الكود.")
             print("   على Railway/Render اربط Volume واضبط DATA_DIR=/data")
