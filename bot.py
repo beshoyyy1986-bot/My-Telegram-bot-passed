@@ -913,6 +913,14 @@ def cmd_start(message):
     except:
         pass
     user_session_state.pop(user_id, None)
+    
+    # Ensure user exists in database
+    conn = db()
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+    conn.commit()
+    conn.close()
+    
     send_banner(chat_id, user_id, MAIN_CAPTION, main_menu_kb())
 
 # ═══════════════════════════════════════
