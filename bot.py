@@ -1660,4 +1660,33 @@ print("🔥 التوقيع: 𝕭𝖆𝕭𝖆_𝕸𝖊𝕯𝖎𝖆")
 print(f"👤 الأدمن ID: {ADMIN_ID}")
 _startup_report()
 print("━" * 45)
-bot.infinity_polling()
+
+# ────────────────────────────────────────────────
+# Webhook Mode for Vercel (replaces infinity_polling)
+# ────────────────────────────────────────────────
+from flask import Flask, request
+
+app = Flask(__name__)
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return '', 200
+    return 'Invalid request', 400
+
+# Set webhook on startup (only once, when deployed)
+WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
+if WEBHOOK_URL:
+    try:
+        bot.remove_webhook()
+        time.sleep(1)
+        bot.set_webhook(url=f"{WEBHOOK_URL.rstrip('/')}/webhook")
+        print(f"✅ Webhook set to: {WEBHOOK_URL}/webhook")
+    except Exception as e:
+        print(f"❌ Failed to set webhook: {e}")
+else:
+    print("⚠️ WEBHOOK_URL not set — bot will NOT receive updates!")
+    print("   Set it in Vercel Environment Variables (e.g., https://mybot.vercel.app)")
