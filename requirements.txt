@@ -1,3 +1,4 @@
 # style (ألوان الأزرار — Bot API 9.4) مدعوم من 4.31.0
 pyTelegramBotAPI>=4.31.0
 requests>=2.31.0
+Flask>=2.3.0
