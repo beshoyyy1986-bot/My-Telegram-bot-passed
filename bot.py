@@ -1662,7 +1662,7 @@ _startup_report()
 print("━" * 45)
 
 # ────────────────────────────────────────────────
-# Webhook Mode for Vercel (replaces infinity_polling)
+# Webhook Mode (Flask server for Railway)
 # ────────────────────────────────────────────────
 from flask import Flask, request
 
@@ -1677,6 +1677,10 @@ def webhook():
         return '', 200
     return 'Invalid request', 400
 
+@app.route('/', methods=['GET'])
+def index():
+    return 'Bot is running', 200
+
 # Set webhook on startup (only once, when deployed)
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 if WEBHOOK_URL:
@@ -1689,4 +1693,9 @@ if WEBHOOK_URL:
         print(f"❌ Failed to set webhook: {e}")
 else:
     print("⚠️ WEBHOOK_URL not set — bot will NOT receive updates!")
-    print("   Set it in Vercel Environment Variables (e.g., https://mybot.vercel.app)")
+    print("   Set it in Railway Environment Variables (e.g., https://mybot.up.railway.app)")
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 8080))
+    print(f"🚀 Flask server listening on 0.0.0.0:{port}")
+    app.run(host='0.0.0.0', port=port)
