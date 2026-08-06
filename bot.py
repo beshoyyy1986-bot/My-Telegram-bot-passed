@@ -762,25 +762,32 @@ STYLE_PRIMARY = "primary"   # 🔵 أزرق — الإجراءات الرئيس�
 STYLE_SUCCESS = "success"   # 🟢 أخضر — الإجراءات الإيجابية
 STYLE_DANGER  = "danger"    # 🔴 أحمر — الإجراءات الحساسة/الرجوع
 
-# تحقق أن المكتبة المثبتة تدعم style فعلياً.
-# ملاحظة: الإصدارات القديمة تبتلع style داخل **kwargs بدون خطأ،
-# لذلك نفحص المخرج المُسلسل (to_dict) وليس مجرد نجاح الاستدعاء.
+# تحقق دقيق من دعم style: هل المكتبة تقبل الوسيط *وتُدرجه في to_dict*؟
+STYLE_SUPPORTED = False
 try:
+    # إنشاء زر تجريبي مع style
     _probe = types.InlineKeyboardButton("t", callback_data="t", style=STYLE_PRIMARY)
-    STYLE_SUPPORTED = _probe.to_dict().get('style') == STYLE_PRIMARY
+    # التحقق من أن style ظهر في التمثيل المسلسل (الضمان الوحيد للفعالية)
+    if hasattr(_probe, 'to_dict'):
+        d = _probe.to_dict()
+        if isinstance(d, dict) and d.get('style') == STYLE_PRIMARY:
+            STYLE_SUPPORTED = True
 except Exception:
-    STYLE_SUPPORTED = False
+    pass
 
 if not STYLE_SUPPORTED:
     logger.warning(
-        "⚠️ إصدار pyTelegramBotAPI الحالى لا يدعم ألوان الأزرار (style). "
-        "حدّث المكتبة: pip install -U 'pyTelegramBotAPI>=4.31.0'"
+        "⚠️ إصدار pyTelegramBotAPI لا يدعم ألوان الأزرار (style). "
+        "لتفعيل الألوان: حدّث المكتبة بأمر:\n"
+        "   pip install -U 'pyTelegramBotAPI>=4.31.0'"
     )
 
 def btn(text, style=None, **kwargs):
-    """زر إنلاين مع لون — يتجاهل اللون تلقائياً لو المكتبة قديمة"""
+    """زر إنلاين مع لون — يمرر style فقط إذا كان مدعومًا فعليًا"""
     if style and STYLE_SUPPORTED:
         return types.InlineKeyboardButton(text, style=style, **kwargs)
+    # إزالة style من kwargs تجنبًا لأي استثناء في المكتبات القديمة
+    kwargs.pop('style', None)
     return types.InlineKeyboardButton(text, **kwargs)
 
 def main_menu_kb():
