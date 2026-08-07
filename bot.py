@@ -371,8 +371,44 @@ def fetch_proxies_from_github():
             pass
     return list(set(all_proxies))
 
+def parse_proxy(proxy_str):
+    """
+    يحول أي صيغة بروكسي إلى dict مناسب لـ requests.
+    الصيغ المدعومة:
+      ip:port                             — بروكسي عادي
+      user:pass@ip:port                   — مصادق عليه
+      http://user:pass@ip:port            — HTTP مصادق عليه
+      https://user:pass@host:port         — HTTPS مصادق عليه (Oxylabs)
+      network-res_mob:pass@host:port      — روتيشن (SOAX / Smartproxy)
+    """
+    s = proxy_str.strip()
+    if not s:
+        return None
+    if s.startswith('https://'):
+        return {"http": s, "https": s}
+    if s.startswith('http://'):
+        return {"http": s, "https": s}
+    # user:pass@host:port  أو  ip:port
+    return {"http": f"http://{s}", "https": f"http://{s}"}
+
+
+def is_rotating_proxy(proxy_str):
+    """
+    يحدد إذا كان البروكسي دوار/مصادق عليه → يُضاف مباشرة بدون اختبار.
+    المعيار: يحتوي على @ أو يبدأ بـ https:// أو http://user:pass@
+    """
+    s = proxy_str.strip()
+    if '@' in s:
+        return True
+    if s.startswith('https://'):
+        return True
+    return False
+
+
 def check_proxy_accurate(proxy):
-    proxy_dict = {"http": f"http://{proxy}", "https": f"http://{proxy}"}
+    proxy_dict = parse_proxy(proxy)
+    if not proxy_dict:
+        return None
     try:
         r = requests.get("http://httpbin.org/ip", proxies=proxy_dict, timeout=8)
         if r.status_code == 200 and r.json().get('origin'):
@@ -389,14 +425,31 @@ def check_proxy_accurate(proxy):
     return None
 
 def add_proxies_to_pool(proxy_list):
-    working = []
+    """
+    يضيف قائمة بروكسيات:
+    - الدوارة/المصادق عليها (@ أو https://) تُضاف فوراً بدون اختبار.
+    - العادية (ip:port) تُختبر أولاً ثم تُضاف.
+    """
+    rotating = [p for p in proxy_list if is_rotating_proxy(p)]
+    regular  = [p for p in proxy_list if not is_rotating_proxy(p)]
+    working  = []
+
+    # الدوارة مباشرة
+    for p in rotating:
+        proxy_pool.add_proxy(p)
+        working.append(p)
+    if rotating:
+        logger.info(f"⚡ أُضيف {len(rotating)} بروكسي دوار مباشرة")
+
+    # العادية بعد اختبار
     with ThreadPoolExecutor(max_workers=20) as ex:
-        futures = {ex.submit(check_proxy_accurate, p): p for p in proxy_list}
+        futures = {ex.submit(check_proxy_accurate, p): p for p in regular}
         for future in as_completed(futures):
             res = future.result()
             if res:
                 working.append(res)
                 proxy_pool.add_proxy(res)
+
     with open(PROXY_TXT, "w") as f:
         f.write("\n".join(working))
     return working
@@ -539,9 +592,7 @@ def check_card_on_site(card_str, site_url, proxy=None):
     if len(year) == 2:
         year = "20" + year
 
-    proxy_dict = (
-        {"http": f"http://{proxy}", "https": f"http://{proxy}"} if proxy else None
-    )
+    proxy_dict = parse_proxy(proxy) if proxy else None
     session = requests.Session()
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
@@ -790,7 +841,7 @@ def btn(text, style=None, **kwargs):
     kwargs.pop('style', None)
     return types.InlineKeyboardButton(text, **kwargs)
 
-def main_menu_kb():
+def main_menu_kb(user_id=None):
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(
         btn("💳 فحص كارت",   STYLE_SUCCESS, callback_data="menu_single"),
@@ -800,6 +851,9 @@ def main_menu_kb():
         btn("👤 حسابى",      STYLE_PRIMARY, callback_data="menu_account"),
         btn("🎫 كود تفعيل",  STYLE_SUCCESS, callback_data="menu_redeem"),
     )
+    # زر الإدارة يظهر للأدمن فقط
+    if user_id and user_id == ADMIN_ID:
+        kb.add(btn("🛠️ لوحة الإدارة", STYLE_DANGER, callback_data="menu_admin"))
     kb.add(
         btn("🆘 الدعم", STYLE_PRIMARY, url="https://t.me/BaBa_MeDia_0"),
     )
@@ -931,9 +985,9 @@ def cmd_start(message):
     # تجديد الرسالة الموجودة بدل إرسال رسالة جديدة في كل /start
     mid = user_main_message.get(user_id)
     if mid:
-        edit_banner(user_id, chat_id, MAIN_CAPTION, main_menu_kb(), msg_id=mid)
+        edit_banner(user_id, chat_id, MAIN_CAPTION, main_menu_kb(user_id), msg_id=mid)
     else:
-        send_banner(chat_id, user_id, MAIN_CAPTION, main_menu_kb())
+        send_banner(chat_id, user_id, MAIN_CAPTION, main_menu_kb(user_id))
 
 # ═══════════════════════════════════════
 # /addproxy ip:port [ip:port ...] — أدمن فقط
@@ -1100,18 +1154,56 @@ def admin_proxy_input(message):
         admin_session.pop(user_id, None)
         return
     raw = message.text.strip()
-    proxies = [p.strip() for p in raw.splitlines() if p.strip() and ':' in p]
+    # قبول أي صيغة: ip:port / user:pass@host:port / https://... / http://...
+    proxies = [p.strip() for p in raw.splitlines()
+               if p.strip() and (':' in p or p.strip().startswith('http'))]
     if not proxies:
-        bot.send_message(user_id, "❌ صيغة خاطئة. أرسل `ip:port` (سطر لكل بروكسي).", parse_mode="Markdown")
+        bot.send_message(
+            user_id,
+            "❌ لم يُعثر على بروكسي صالح.\n"
+            "الصيغ المقبولة:\n"
+            "`ip:port`\n"
+            "`user:pass@host:port`\n"
+            "`https://user:pass@host:port`",
+            parse_mode="Markdown"
+        )
         admin_session[user_id] = 'authenticated'
         show_admin_menu(user_id)
         return
-    m = bot.send_message(user_id, f"🔍 جارى التحقق من {len(proxies)} بروكسي...")
+
+    rotating = [p for p in proxies if is_rotating_proxy(p)]
+    regular  = [p for p in proxies if not is_rotating_proxy(p)]
+
+    # إذا كانت كلها دوارة — أضفها فوراً بدون خيط اختبار
+    if rotating and not regular:
+        for p in rotating:
+            proxy_pool.add_proxy(p)
+        bot.send_message(
+            user_id,
+            f"⚡ تمت إضافة *{len(rotating)}* بروكسي دوار/مصادق مباشرة.",
+            parse_mode="Markdown"
+        )
+        admin_session[user_id] = 'authenticated'
+        show_admin_menu(user_id)
+        return
+
+    suffix = f" + {len(rotating)} دوار مباشرة" if rotating else ""
+    m = bot.send_message(
+        user_id,
+        f"🔍 جارى التحقق من *{len(regular)}* بروكسي عادي{suffix}...",
+        parse_mode="Markdown"
+    )
     def _check():
         working = add_proxies_to_pool(proxies)
+        rot_cnt = len([w for w in working if is_rotating_proxy(w)])
+        reg_cnt = len(working) - rot_cnt
+        lines = [f"✅ تمت إضافة *{len(working)}* بروكسي:"]
+        if rot_cnt:
+            lines.append(f"  ⚡ {rot_cnt} دوار (مضاف مباشرة)")
+        if reg_cnt:
+            lines.append(f"  🔍 {reg_cnt} من {len(regular)} عادي (اجتاز الاختبار)")
         bot.edit_message_text(
-            f"✅ تمت إضافة *{len(working)}* من أصل *{len(proxies)}* بروكسي شغال.",
-            user_id, m.message_id, parse_mode="Markdown"
+            "\n".join(lines), user_id, m.message_id, parse_mode="Markdown"
         )
     threading.Thread(target=_check).start()
     admin_session[user_id] = 'authenticated'
@@ -1246,9 +1338,9 @@ def handle_text(message):
     # ─── افتراضي: القائمة الرئيسية ───
     mid = user_main_message.get(user_id)
     if mid:
-        edit_banner(user_id, chat_id, MAIN_CAPTION, main_menu_kb())
+        edit_banner(user_id, chat_id, MAIN_CAPTION, main_menu_kb(user_id))
     else:
-        send_banner(chat_id, user_id, MAIN_CAPTION, main_menu_kb())
+        send_banner(chat_id, user_id, MAIN_CAPTION, main_menu_kb(user_id))
 
 # ═══════════════════════════════════════
 # Callback: القائمة الرئيسية
@@ -1260,7 +1352,7 @@ def cb_main_menu(call):
     mid     = call.message.message_id
     user_session_state.pop(user_id, None)
     user_main_message[user_id] = mid
-    edit_banner(user_id, chat_id, MAIN_CAPTION, main_menu_kb(), msg_id=mid)
+    edit_banner(user_id, chat_id, MAIN_CAPTION, main_menu_kb(user_id), msg_id=mid)
     bot.answer_callback_query(call.id)
 
 # ═══════════════════════════════════════
@@ -1306,6 +1398,19 @@ def cb_menu_bulk(call):
                 "📋 *فحص مجموعة كروت*\n\n━━━━━━━━━━━━━━━━━━━━━━\n"
                 "اختر البوابة 👇",
                 gates_kb('bulk'), msg_id=mid)
+
+# ═══════════════════════════════════════
+# Callback: حسابى
+# ═══════════════════════════════════════
+@bot.callback_query_handler(func=lambda c: c.data == "menu_admin")
+def cb_menu_admin(call):
+    user_id = call.from_user.id
+    if user_id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "⛔ غير مصرح لك.")
+        return
+    bot.answer_callback_query(call.id)
+    admin_session[user_id] = 'authenticated'
+    show_admin_menu(user_id)
 
 # ═══════════════════════════════════════
 # Callback: حسابى
@@ -1666,9 +1771,12 @@ def cb_admin(call):
         bot.send_message(
             user_id,
             "📡 *إضافة بروكسي يدوي*\n\n"
-            "أرسل البروكسيات بصيغة `ip:port` (سطر لكل بروكسي):\n\n"
-            "`1.2.3.4:8080`\n"
-            "`5.6.7.8:3128`",
+            "مدعوم جميع الصيغ (سطر لكل بروكسي):\n\n"
+            "`1.2.3.4:8080` — عادي\n"
+            "`user:pass@1.2.3.4:8080` — مصادق عليه\n"
+            "`https://user:pass@host:60000` — HTTPS (مثل Oxylabs)\n"
+            "`network\\-res\\_mob:pass@proxy.soax.com:1337` — روتيشن\n\n"
+            "⚡ *البروكسيات المصادق عليها تُضاف فوراً بدون اختبار*",
             parse_mode="Markdown"
         )
         admin_session[user_id] = 'awaiting_proxy_input'
