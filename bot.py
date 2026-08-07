@@ -1750,10 +1750,12 @@ if WEBHOOK_URL:
     try:
         bot.remove_webhook()
         time.sleep(1)
-        # نشيل /webhook من الآخر لو الـ user حطها عن طريق الخطأ، ثم نضيفها
         _base = WEBHOOK_URL.rstrip('/')
         if _base.endswith('/webhook'):
             _base = _base[:-8]
+        # تأكد من وجود https://
+        if not _base.startswith('http://') and not _base.startswith('https://'):
+            _base = 'https://' + _base
         bot.set_webhook(url=f"{_base}/webhook")
         print(f"✅ Webhook set to: {_base}/webhook")
     except Exception as e:
