@@ -1740,7 +1740,7 @@ else:
     print("⚠️ WEBHOOK_URL not set — bot will NOT receive updates!")
     print("   Set it in Railway Environment Variables (e.g., https://mybot.up.railway.app)")
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))
-    print(f"🚀 Flask server listening on 0.0.0.0:{port}")
-    app.run(host='0.0.0.0', port=port)
+
+# Expose app for Gunicorn
+if __name__ != '__main__':
+    pass
