@@ -251,7 +251,7 @@ def update_proxy_failure(proxy):
     )
     c.execute(
         "UPDATE proxies SET status = 'dead' "
-        "WHERE proxy = ? AND fail_count >= 3", (proxy,)
+        "WHERE proxy = ? AND fail_count >= 10", (proxy,)
     )
     conn.commit()
     conn.close()
