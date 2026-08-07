@@ -622,12 +622,21 @@ def check_card_on_site(card_str, site_url, proxy=None):
         stripe_data = {
             'type': 'card', 'card[number]': cc, 'card[cvc]': cvv,
             'card[exp_month]': month, 'card[exp_year]': year[-2:],
-            'key': pk_m.group(0), '_stripe_version': '2024-06-20'
+            'key': pk_m.group(0),
+            'payment_user_agent': 'stripe.js/v3; stripe-js-v3/5.0.0',
+            'time_on_page': str(random.randint(30000, 90000)),
+            'referrer': f"{site_url}/my-account/add-payment-method/",
         }
         resp   = session.post("https://api.stripe.com/v1/payment_methods",
                               data=stripe_data,
-                              headers={'Content-Type': 'application/x-www-form-urlencoded',
-                                       'Origin': 'https://js.stripe.com'},
+                              headers={
+                                  'Content-Type': 'application/x-www-form-urlencoded',
+                                  'Origin': 'https://js.stripe.com',
+                                  'Referer': 'https://js.stripe.com/',
+                                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+                                  'Stripe-Version': '2024-06-20',
+                                  'Accept': 'application/json',
+                              },
                               proxies=proxy_dict, timeout=25)
         pm_json = resp.json()
         pm_id   = pm_json.get('id')
@@ -937,8 +946,8 @@ def edit_banner(user_id, chat_id, caption, markup, msg_id=None):
 # شريط التقدم
 # ═══════════════════════════════════════
 STATUS_LABEL = {
-    "PASSED":       ("✅", "PASSED — تمت الإضافة"),
-    "OTP":          ("⚠️", "OTP / 3D SECURE"),
+    "PASSED":       ("✅", "LIVE ✅"),
+    "OTP":          ("✅", "Approved 3DS ✅"),
     "LIVE":         ("💚", "LIVE — رصيد غير كافى"),
     "CCN":          ("🟡", "CCN — الرقم صحيح CVV خطأ"),
     "DECLINED":     ("❌", "DECLINED"),
@@ -1532,18 +1541,24 @@ def check_single_ui(card_str, chat_id, user_id, gate_id, msg_id):
     bin_inf = get_bin_info(bin6)
 
     icon, label = STATUS_LABEL.get(status, ("❌", "DECLINED"))
-
     safe_reason = md_escape(reason)[:180] if reason else ""
 
-    cap = (
+    # إرجاع البانر للقائمة الرئيسية أولاً
+    try:
+        edit_banner(user_id, chat_id, MAIN_CAPTION, main_menu_kb(user_id), msg_id=msg_id)
+    except:
+        pass
+
+    # إرسال النتيجة كرسالة منفصلة ثابتة
+    result_msg = (
         f"{icon} *{label}*\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💳 `{card_str}`\n"
         f"🏦 البوابة: {gate_name}\n"
     )
     if safe_reason:
-        cap += f"📄 الرد: _{safe_reason}_\n"
-    cap += (
+        result_msg += f"📄 الرد: _{safe_reason}_\n"
+    result_msg += (
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🔢 BIN: `{bin6}`\n"
         f"🏛️ البنك: {bin_inf['bank']}\n"
@@ -1554,10 +1569,7 @@ def check_single_ui(card_str, chat_id, user_id, gate_id, msg_id):
     )
 
     try:
-        bot.edit_message_caption(
-            caption=cap, chat_id=chat_id, message_id=msg_id,
-            reply_markup=after_check_kb('single'), parse_mode="Markdown"
-        )
+        bot.send_message(chat_id, result_msg, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"single card result error: {e}")
 
@@ -1626,7 +1638,7 @@ def check_bulk_ui(cards, chat_id, user_id, gate_id, msg_id):
             res['done'] += 1
         push_progress()
 
-        # أرسل رسالة منفصلة للنتائج المهمة فقط
+        # أرسل رسالة منفصلة ثابتة للنتائج المهمة
         if status in ("PASSED", "OTP", "LIVE", "CCN"):
             icon, label = STATUS_LABEL.get(status, ("✅", status))
             bin6    = card.split('|')[0][:6]
@@ -1635,9 +1647,13 @@ def check_bulk_ui(cards, chat_id, user_id, gate_id, msg_id):
                 bot.send_message(
                     chat_id,
                     f"{icon} *{label}* | {gate_name}\n"
-                    f"`{card}`\n"
-                    f"📄 _{md_escape(reason)[:120]}_\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"💳 `{card}`\n"
+                    f"📄 _{md_escape(reason)[:150]}_\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🔢 BIN: `{bin6}`\n"
                     f"🏛️ {bin_inf['bank']} | {bin_inf['country']} {bin_inf['flag']}\n"
+                    f"💠 {bin_inf['brand']} ╱ {bin_inf['type']}\n"
                     f"🔥 *BaBa\\_MeDia*",
                     parse_mode="Markdown"
                 )
@@ -1657,18 +1673,24 @@ def check_bulk_ui(cards, chat_id, user_id, gate_id, msg_id):
                     res['skipped'] += 1
                     res['done']    += 1
 
-    # ملخص نهائي
+    # إرجاع البانر للقائمة الرئيسية
+    try:
+        edit_banner(user_id, chat_id, MAIN_CAPTION, main_menu_kb(user_id), msg_id=msg_id)
+    except:
+        pass
+
+    # إرسال ملخص النتائج كرسالة منفصلة ثابتة
     cap = (
         f"🏁 *انتهى الفحص!*\n\n"
         f"🏦 البوابة: {gate_name}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📦 الإجمالي: *{total}* كارت\n"
-        f"✅ نجح:      *{res['passed']}*\n"
-        f"⚠️ OTP:      *{res['otp']}*\n"
-        f"💚 LIVE:     *{res['live']}*\n"
-        f"🟡 CCN:      *{res['ccn']}*\n"
-        f"❌ رُفض:     *{res['declined']}*\n"
-        f"🛠️ لم يُفحص: *{res['skipped']}*\n"
+        f"✅ LIVE:      *{res['passed']}*\n"
+        f"✅ 3DS:       *{res['otp']}*\n"
+        f"💚 LIVE رصيد: *{res['live']}*\n"
+        f"🟡 CCN:       *{res['ccn']}*\n"
+        f"❌ رُفض:      *{res['declined']}*\n"
+        f"🛠️ لم يُفحص:  *{res['skipped']}*\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
     )
     if res['skipped']:
@@ -1677,10 +1699,7 @@ def check_bulk_ui(cards, chat_id, user_id, gate_id, msg_id):
                 "━━━━━━━━━━━━━━━━━━━━━━\n")
     cap += f"🔥 *CHECK BY: BaBa\\_MeDia* 🔥"
     try:
-        bot.edit_message_caption(
-            caption=cap, chat_id=chat_id, message_id=msg_id,
-            reply_markup=after_check_kb('bulk'), parse_mode="Markdown"
-        )
+        bot.send_message(chat_id, cap, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"bulk summary error: {e}")
 
