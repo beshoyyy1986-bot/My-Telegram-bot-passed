@@ -1,0 +1,6 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "pip install -r requirements.txt && python -m gunicorn bot:app --bind 0.0.0.0:$PORT"
+restartPolicyType = "on_failure"
