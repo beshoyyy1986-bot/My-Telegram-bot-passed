@@ -927,8 +927,48 @@ def cmd_start(message):
     c.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
     conn.commit()
     conn.close()
-    
-    send_banner(chat_id, user_id, MAIN_CAPTION, main_menu_kb())
+
+    # تجديد الرسالة الموجودة بدل إرسال رسالة جديدة في كل /start
+    mid = user_main_message.get(user_id)
+    if mid:
+        edit_banner(user_id, chat_id, MAIN_CAPTION, main_menu_kb(), msg_id=mid)
+    else:
+        send_banner(chat_id, user_id, MAIN_CAPTION, main_menu_kb())
+
+# ═══════════════════════════════════════
+# /addproxy ip:port [ip:port ...] — أدمن فقط
+# المستخدم يبعت /addproxy 1.2.3.4:8080 5.6.7.8:3128
+# ═══════════════════════════════════════
+@bot.message_handler(commands=['addproxy'])
+def cmd_addproxy(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    try:
+        bot.delete_message(message.chat.id, message.message_id)
+    except:
+        pass
+    args = message.text.split()[1:]
+    if not args:
+        bot.send_message(message.chat.id,
+            "📡 *إضافة بروكسي يدوي*\n\n"
+            "أرسل البروكسيات هكذا:\n"
+            "`/addproxy 1.2.3.4:8080`\n"
+            "`/addproxy 1.2.3.4:8080 5.6.7.8:3128`\n\n"
+            "أو أرسل ملف `.txt` باسم يحتوى على `proxy` وكل سطر بروكسي.",
+            parse_mode="Markdown")
+        return
+    valid = [p for p in args if ':' in p]
+    if not valid:
+        bot.send_message(message.chat.id, "❌ صيغة خاطئة. المطلوب: `ip:port`", parse_mode="Markdown")
+        return
+    m = bot.send_message(message.chat.id, f"🔍 جارى التحقق من {len(valid)} بروكسي...")
+    def _check_and_add():
+        working = add_proxies_to_pool(valid)
+        bot.edit_message_text(
+            f"✅ تمت إضافة *{len(working)}* من أصل *{len(valid)}* بروكسي شغال.",
+            message.chat.id, m.message_id, parse_mode="Markdown"
+        )
+    threading.Thread(target=_check_and_add).start()
 
 # ═══════════════════════════════════════
 # /status (أدمن)
@@ -1533,6 +1573,7 @@ def show_admin_menu(user_id):
         btn("📊 حالة البروكسيات", STYLE_PRIMARY, callback_data="admin_proxy_stats"),
     )
     kb.add(
+        btn("🔍 تشخيص البوابات",  STYLE_PRIMARY, callback_data="admin_test_gates"),
         btn("❌ خروج",            STYLE_DANGER,  callback_data="admin_logout"),
     )
     bot.send_message(
@@ -1593,6 +1634,10 @@ def cb_admin(call):
     elif data == "admin_fetch_proxies":
         bot.send_message(user_id, "📡 جاري سحب بروكسيات من GitHub...")
         threading.Thread(target=_fetch_and_add, args=(user_id,)).start()
+
+    elif data == "admin_test_gates":
+        m2 = bot.send_message(user_id, "🔍 جارى اختبار البوابات...")
+        threading.Thread(target=_run_gate_test, args=(user_id, m2.message_id)).start()
 
     elif data == "admin_proxy_stats":
         a, b, d = proxy_pool.get_stats()
@@ -1662,7 +1707,7 @@ _startup_report()
 print("━" * 45)
 
 # ────────────────────────────────────────────────
-# Webhook Mode for Vercel (replaces infinity_polling)
+# Webhook Mode (Flask server for Railway)
 # ────────────────────────────────────────────────
 from flask import Flask, request
 
@@ -1677,6 +1722,10 @@ def webhook():
         return '', 200
     return 'Invalid request', 400
 
+@app.route('/', methods=['GET'])
+def index():
+    return 'Bot is running', 200
+
 # Set webhook on startup (only once, when deployed)
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
 if WEBHOOK_URL:
@@ -1689,4 +1738,9 @@ if WEBHOOK_URL:
         print(f"❌ Failed to set webhook: {e}")
 else:
     print("⚠️ WEBHOOK_URL not set — bot will NOT receive updates!")
-    print("   Set it in Vercel Environment Variables (e.g., https://mybot.vercel.app)")
+    print("   Set it in Railway Environment Variables (e.g., https://mybot.up.railway.app)")
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 8080))
+    print(f"🚀 Flask server listening on 0.0.0.0:{port}")
+    app.run(host='0.0.0.0', port=port)
