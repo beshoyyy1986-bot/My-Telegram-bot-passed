@@ -1715,12 +1715,30 @@ app = Flask(__name__)
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    if request.is_json or 'application/json' in request.headers.get('content-type', ''):
+    ct = request.headers.get('content-type', '')
+    logger.info(f"[webhook] POST received | content-type={ct!r} | size={request.content_length}")
+    if request.is_json or 'application/json' in ct:
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
         bot.process_new_updates([update])
         return '', 200
+    logger.warning(f"[webhook] Rejected request | content-type={ct!r}")
     return 'Invalid request', 400
+
+@app.route('/health', methods=['GET'])
+def health():
+    try:
+        me = bot.get_me()
+        wh = bot.get_webhook_info()
+        return {
+            'status': 'ok',
+            'bot': me.username,
+            'webhook_url': wh.url,
+            'pending_updates': wh.pending_update_count,
+            'last_error': wh.last_error_message or 'none'
+        }
+    except Exception as e:
+        return {'status': 'error', 'detail': str(e)}, 500
 
 @app.route('/', methods=['GET'])
 def index():
