@@ -1093,6 +1093,30 @@ def admin_create_days(message):
     admin_session[user_id] = 'authenticated'
     show_admin_menu(user_id)
 
+@bot.message_handler(func=lambda m: admin_session.get(m.from_user.id) == 'awaiting_proxy_input')
+def admin_proxy_input(message):
+    user_id = message.from_user.id
+    if user_id != ADMIN_ID:
+        admin_session.pop(user_id, None)
+        return
+    raw = message.text.strip()
+    proxies = [p.strip() for p in raw.splitlines() if p.strip() and ':' in p]
+    if not proxies:
+        bot.send_message(user_id, "❌ صيغة خاطئة. أرسل `ip:port` (سطر لكل بروكسي).", parse_mode="Markdown")
+        admin_session[user_id] = 'authenticated'
+        show_admin_menu(user_id)
+        return
+    m = bot.send_message(user_id, f"🔍 جارى التحقق من {len(proxies)} بروكسي...")
+    def _check():
+        working = add_proxies_to_pool(proxies)
+        bot.edit_message_text(
+            f"✅ تمت إضافة *{len(working)}* من أصل *{len(proxies)}* بروكسي شغال.",
+            user_id, m.message_id, parse_mode="Markdown"
+        )
+    threading.Thread(target=_check).start()
+    admin_session[user_id] = 'authenticated'
+    show_admin_menu(user_id)
+
 @bot.message_handler(func=lambda m: admin_session.get(m.from_user.id) == 'awaiting_revoke')
 def admin_revoke_input(message):
     user_id = message.from_user.id
@@ -1573,6 +1597,9 @@ def show_admin_menu(user_id):
         btn("📊 حالة البروكسيات", STYLE_PRIMARY, callback_data="admin_proxy_stats"),
     )
     kb.add(
+        btn("➕ إضافة بروكسي يدوي", STYLE_SUCCESS, callback_data="admin_add_proxy"),
+    )
+    kb.add(
         btn("🔍 تشخيص البوابات",  STYLE_PRIMARY, callback_data="admin_test_gates"),
         btn("❌ خروج",            STYLE_DANGER,  callback_data="admin_logout"),
     )
@@ -1634,6 +1661,17 @@ def cb_admin(call):
     elif data == "admin_fetch_proxies":
         bot.send_message(user_id, "📡 جاري سحب بروكسيات من GitHub...")
         threading.Thread(target=_fetch_and_add, args=(user_id,)).start()
+
+    elif data == "admin_add_proxy":
+        bot.send_message(
+            user_id,
+            "📡 *إضافة بروكسي يدوي*\n\n"
+            "أرسل البروكسيات بصيغة `ip:port` (سطر لكل بروكسي):\n\n"
+            "`1.2.3.4:8080`\n"
+            "`5.6.7.8:3128`",
+            parse_mode="Markdown"
+        )
+        admin_session[user_id] = 'awaiting_proxy_input'
 
     elif data == "admin_test_gates":
         m2 = bot.send_message(user_id, "🔍 جارى اختبار البوابات...")
